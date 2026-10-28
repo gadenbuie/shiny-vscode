@@ -21,6 +21,48 @@ import type * as vscode from "vscode";
  */
 const IDLE_FAILURE_THRESHOLD_MS = 2000;
 
+// Positron versions whose positron-run-app reports console app startup
+// failures itself (posit-dev/positron#16435), ending the run and notifying
+// the user when the app exits before its URL is detected. On these versions
+// watching the session ourselves would duplicate Positron's notification, so
+// callers should skip watchConsoleSessionForStartupFailure.
+const FIRST_SELF_REPORTING_VERSION = [2026, 10, 0] as const;
+const FIRST_SELF_REPORTING_BUILD = 297;
+
+/**
+ * Whether this Positron build reports console app startup failures on its
+ * own (see above). When it does, we rely on Positron's notification and skip
+ * our own watch; when it doesn't, or when we can't tell, we keep ours so the
+ * user still gets a prompt failure report (worst case, a Positron we failed
+ * to recognize also notifies and the user sees the failure twice).
+ *
+ * `positron.version` is the calendar version (e.g. "2026.10.0") without a
+ * build number, so the 2026.10.0 boundary needs `positron.buildNumber` too.
+ * Both have been part of the Positron API since before the oldest Positron
+ * this extension supports (2025.12.0).
+ */
+export function positronReportsConsoleStartupFailure(
+  pst: Pick<typeof positron, "version" | "buildNumber">
+): boolean {
+  const match = /^(\d{4})\.(\d{1,2})\.(\d+)$/.exec(pst.version ?? "");
+  if (!match) {
+    // Unrecognized version format: keep our own watch.
+    return false;
+  }
+  const version = [Number(match[1]), Number(match[2]), Number(match[3])];
+  for (let i = 0; i < version.length; i++) {
+    if (version[i] !== FIRST_SELF_REPORTING_VERSION[i]) {
+      return version[i] > FIRST_SELF_REPORTING_VERSION[i];
+    }
+  }
+  // Same release as the fix: it shipped in build 297. Without a build number
+  // we can't place this build within the release, so keep our own watch.
+  return (
+    typeof pst.buildNumber === "number" &&
+    pst.buildNumber >= FIRST_SELF_REPORTING_BUILD
+  );
+}
+
 export interface StartupFailureWatch {
   /**
    * Resolves when the watched console session indicates the app failed to

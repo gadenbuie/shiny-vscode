@@ -1,8 +1,12 @@
 import * as assert from "assert";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import * as vscode from "vscode";
 import {
   appStatusFileMessage,
   configShinyTimeoutOpenBrowserForPositronConsole,
+  watchAppStatusFile,
 } from "../../net-utils";
 
 const SETTING = "shiny.timeoutOpenBrowser";
@@ -84,6 +88,59 @@ suite("configShinyTimeoutOpenBrowserForPositronConsole", () => {
       configShinyTimeoutOpenBrowserForPositronConsole(),
       30_000
     );
+  });
+});
+
+suite("watchAppStatusFile", () => {
+  test("observes an atomically published startup error", async function () {
+    this.timeout(8_000);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "shiny-status-test-"));
+    const statusFile = path.join(dir, "status");
+    const watch = watchAppStatusFile(statusFile);
+    let timeout: NodeJS.Timeout | undefined;
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(
+        () => reject(new Error("Status was not observed")),
+        5_000
+      );
+    });
+
+    try {
+      fs.writeFileSync(`${statusFile}.tmp`, "error\nstartup failed\n");
+      fs.renameSync(`${statusFile}.tmp`, statusFile);
+      assert.strictEqual(
+        await Promise.race([watch.status, deadline]),
+        "error\nstartup failed\n"
+      );
+    } finally {
+      clearTimeout(timeout);
+      watch.dispose();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("stops observing after disposal", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "shiny-status-test-"));
+    const statusFile = path.join(dir, "status");
+    const watch = watchAppStatusFile(statusFile);
+    let timeout: NodeJS.Timeout | undefined;
+
+    try {
+      watch.dispose();
+      fs.writeFileSync(statusFile, "error\nstartup failed\n");
+      const observed = await Promise.race([
+        watch.status.then(() => true),
+        // Allow multiple polling intervals to pass after disposal.
+        new Promise<boolean>((resolve) => {
+          timeout = setTimeout(() => resolve(false), 500);
+        }),
+      ]);
+      assert.strictEqual(observed, false);
+    } finally {
+      clearTimeout(timeout);
+      watch.dispose();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

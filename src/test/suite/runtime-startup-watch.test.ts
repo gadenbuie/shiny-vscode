@@ -1,7 +1,10 @@
 import * as assert from "assert";
 import type * as positron from "positron";
 import * as vscode from "vscode";
-import { watchConsoleSessionForStartupFailure } from "../../extension-api-utils/runtime-startup-watch";
+import {
+  positronReportsConsoleStartupFailure,
+  watchConsoleSessionForStartupFailure,
+} from "../../extension-api-utils/runtime-startup-watch";
 
 // Short idle threshold so the debounce tests stay fast.
 const IDLE_MS = 40;
@@ -183,4 +186,36 @@ suite("watchConsoleSessionForStartupFailure", () => {
     emitter.fire("idle" as positron.RuntimeState);
     assert.strictEqual(await outcome(watch, IDLE_MS * 10), "quiet");
   });
+});
+
+suite("positronReportsConsoleStartupFailure", () => {
+  // The fix shipped in Positron 2026.10.0 build 297
+  // (posit-dev/positron#16435).
+  const cases: [string, unknown, unknown, boolean][] = [
+    // [description, positron.version, positron.buildNumber, expected]
+    ["oldest supported release", "2025.12.0", 167, false],
+    ["release before the fix, high build", "2026.9.0", 9999, false],
+    ["fixed release, build before the fix", "2026.10.0", 296, false],
+    ["fixed release, first fixed build", "2026.10.0", 297, true],
+    ["fixed release, later build", "2026.10.0", 1000, true],
+    ["fixed release, unknown build", "2026.10.0", undefined, false],
+    ["later patch release, low build", "2026.10.1", 1, true],
+    ["later monthly release", "2026.11.0", 10, true],
+    ["much later release", "2027.1.0", 10, true],
+    ["unparseable version", "not-a-version", 500, false],
+    ["unrecognized version suffix", "2026.10.1-custom", 500, false],
+    ["missing version", undefined, 500, false],
+  ];
+
+  for (const [description, version, buildNumber, expected] of cases) {
+    test(`${description}: version=${String(version)} build=${String(
+      buildNumber
+    )}`, () => {
+      const pst = { version, buildNumber } as Pick<
+        typeof positron,
+        "version" | "buildNumber"
+      >;
+      assert.strictEqual(positronReportsConsoleStartupFailure(pst), expected);
+    });
+  }
 });
