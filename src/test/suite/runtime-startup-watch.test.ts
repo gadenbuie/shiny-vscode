@@ -177,6 +177,35 @@ suite("watchConsoleSessionForStartupFailure", () => {
     }
   });
 
+  test("keeps watching the app's session after the user switches consoles", async () => {
+    const { pst, emitter, foregroundEmitter, setSession } =
+      makeFakePositron();
+    const watch = watchConsoleSessionForStartupFailure(pst, "r", IDLE_MS);
+    try {
+      await sleep(0);
+      // The app code starts running in the original session.
+      emitter.fire("busy" as positron.RuntimeState);
+
+      // The user switches to another R console and runs a short command.
+      const otherEmitter: StateEmitter = new vscode.EventEmitter();
+      setSession({
+        runtimeMetadata: { languageId: "r" },
+        onDidChangeRuntimeState: otherEmitter.event,
+      });
+      foregroundEmitter.fire("other-session-id");
+      await sleep(0);
+      otherEmitter.fire("busy" as positron.RuntimeState);
+      otherEmitter.fire("idle" as positron.RuntimeState);
+      assert.strictEqual(await outcome(watch, IDLE_MS * 3), "quiet");
+
+      // The app's session finishing is still reported.
+      emitter.fire("idle" as positron.RuntimeState);
+      assert.strictEqual(await outcome(watch, IDLE_MS * 10), "failed");
+    } finally {
+      watch.dispose();
+    }
+  });
+
   test("never fails after dispose", async () => {
     const { pst, emitter } = makeFakePositron();
     const watch = watchConsoleSessionForStartupFailure(pst, "r", IDLE_MS);

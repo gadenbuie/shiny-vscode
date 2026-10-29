@@ -150,8 +150,15 @@ export function watchConsoleSessionForStartupFailure(
     ) {
       return;
     }
-    // A different console session took over: drop the previous session's
-    // listener and re-arm, so its busy/idle events can't fail this startup.
+    // Once the attached session has gone busy, the app code is running there.
+    // A later foreground change is the user switching consoles, so keep
+    // watching the app's session rather than following the new one.
+    if (sawBusy) {
+      return;
+    }
+    // A different console session took over before the app code started:
+    // drop the previous session's listener and re-arm, so its busy/idle
+    // events can't fail this startup.
     sessionDisposable?.dispose();
     sawBusy = false;
     clearIdleTimer();
